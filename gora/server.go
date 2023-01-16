@@ -36,7 +36,7 @@ func (r *Router) Run(addr string) {
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			r.Logger.Info().Msgf("listen: %s", err)
+			r.Logger.Fatal().Msgf("listen: %s", err)
 		}
 	}()
 
@@ -53,7 +53,7 @@ func (r *Router) RunTLS(addr string, certFile, keyFile string) {
 
 	go func() {
 		if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
-			r.Logger.Info().Msgf("listen: %s", err)
+			r.Logger.Fatal().Msgf("listen: %s", err)
 		}
 	}()
 
