@@ -15,16 +15,68 @@ func TestRouterUse(t *testing.T) {
 	t.Parallel()
 	router := &Router{}
 
+	var middlewareCalled bool
 	var middlewareFunc MiddlewareFunc = func(next HandlerFunc) HandlerFunc {
-		return func(ctx *Context) {}
+		return func(ctx *Context) {
+			middlewareCalled = true
+		}
 	}
 
-	router.Use(middlewareFunc)
-
-	if len(router.middleware) != 1 {
-		t.Error("Expected router to have 1 middleware function")
+	router.Use(middlewareFunc, middlewareFunc)
+	if len(router.middleware) != 2 {
+		t.Error("Expected router to have 2 middleware functions")
 	}
 
+	router.GET("/", func(ctx *Context) {
+		ctx.String("Hello World")
+	})
+
+	req, err := http.NewRequest("GET", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", status)
+	}
+
+	if !middlewareCalled {
+		t.Fatalf("middleware not called")
+	}
+}
+
+func TestInlineMiddleware(t *testing.T) {
+	t.Parallel()
+
+	router := &Router{}
+	var middlewareCalled bool
+
+	router.GET("/", func(ctx *Context) {
+		ctx.String("Hello World")
+	}, func(next HandlerFunc) HandlerFunc {
+		return func(ctx *Context) {
+			middlewareCalled = true
+		}
+	})
+
+	req, err := http.NewRequest("GET", "/", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr := httptest.NewRecorder()
+	router.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", status)
+	}
+
+	if !middlewareCalled {
+		t.Fatalf("middleware not called")
+	}
 }
 
 func TestRouterGroup(t *testing.T) {
@@ -32,9 +84,11 @@ func TestRouterGroup(t *testing.T) {
 	router := &Router{}
 	prefix := "/test"
 
-	middlewareFunc := func(ctx *Context) {}
-
-	group := router.Group(prefix, middlewareFunc)
+	group := router.Group(prefix, func(next HandlerFunc) HandlerFunc {
+		return func(ctx *Context) {
+			next(ctx)
+		}
+	})
 
 	if group.prefix != prefix {
 		t.Error("Expected group to have the correct prefix")
@@ -129,7 +183,7 @@ func TestRouterGroupDELETE(t *testing.T) {
 func TestHelloWorld(t *testing.T) {
 	t.Parallel()
 	HelloWorld := func(ctx *Context) {
-		ctx.HTML(http.StatusOK, "Hello, World!")
+		ctx.HTML("Hello, World!")
 	}
 
 	// Create a request to pass to our handler. We don't have any query parameters for now, so we'll
@@ -176,7 +230,7 @@ func TestJSONParsing(t *testing.T) {
 			{1, "Abiira N"},
 			{2, "Dan K"},
 		}
-		ctx.JSON(http.StatusOK, users)
+		ctx.JSON(users)
 	}
 
 	// Create a request to pass to our handler. We don't have any query parameters for now, so we'll
@@ -235,7 +289,7 @@ func TestDataBinding(t *testing.T) {
 			return
 		}
 
-		ctx.JSON(http.StatusOK, u)
+		ctx.JSON(u)
 	}
 
 	// Create a request to pass to our handler. We don't have any query parameters for now, so we'll

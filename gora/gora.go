@@ -10,7 +10,6 @@ package gora
 
 import (
 	"embed"
-	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -52,13 +51,13 @@ type Router struct {
 	notFound HandlerFunc
 
 	// Request logger
-	Logger *zerolog.Logger
+	Logger zerolog.Logger
 }
 
 // A single route. Stores url patterns, method and their corresponding handlers and middleware.
 type route struct {
 	pattern    *regexp.Regexp
-	handler    func(ctx *Context)
+	handler    func(c *Context)
 	method     string
 	middleware []MiddlewareFunc
 }
@@ -67,7 +66,7 @@ func (r route) String() string {
 	return fmt.Sprintf("/%s - %s", r.method, r.pattern)
 }
 
-type HandlerFunc func(ctx *Context)
+type HandlerFunc func(c *Context)
 type MiddlewareFunc func(next HandlerFunc) HandlerFunc
 
 /*
@@ -84,29 +83,42 @@ type StaticEmbed struct {
 	IndexFile      string    // Path to index.html relative, defaults to "index.html"
 }
 
+// Initializes an instance of gora.Router.
 // Returns a pointer to a new router with the logging and recovery middleware applied.
-// If you don't want whese middleware, call New() instead.
-func Default(logOutput io.Writer) *Router {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: logOutput})
-	if ModeProduction {
-		log.Logger = log.Output(zerolog.Logger{}.Output(logOutput))
+// If you don't want whese middleware, call New() instead and specify middleware yourself.
+// out is where to the logger should write. Defaults to os.Stderr
+func Default(out ...io.Writer) *Router {
+	if len(out) == 0 {
+		if len(out) == 0 {
+			out = append(out, os.Stderr)
+		}
 	}
 
-	r := &Router{Logger: &log.Logger}
-	r.Use(RecoveryMiddleware, LoggerMiddleware)
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: out[0]})
+	if ModeProduction {
+		log.Logger = log.Output(zerolog.Logger{}.Output(out[0]))
+	}
+
+	r := &Router{Logger: log.Logger}
+	r.Use(Recovery, Logger)
 	return r
 }
 
 // Returns a pointer to a new router.
 // If you want logging middleware and recovery middleware applied,
 // use Default() instead.
-func New(logOutput io.Writer) *Router {
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: logOutput})
-	if ModeProduction {
-		log.Logger = log.Output(zerolog.Logger{}.Output(logOutput))
+// out is where to the logger should write. Defaults to os.Stderr
+func New(out ...io.Writer) *Router {
+	if len(out) == 0 {
+		out = append(out, os.Stderr)
 	}
 
-	return &Router{Logger: &log.Logger}
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: out[0]})
+	if ModeProduction {
+		log.Logger = log.Output(zerolog.Logger{}.Output(out[0]))
+	}
+
+	return &Router{Logger: log.Logger}
 }
 
 // Apply middleware to the router.
@@ -115,27 +127,25 @@ func (r *Router) Use(middleware ...MiddlewareFunc) {
 	r.middleware = append(r.middleware, middleware...)
 }
 
-func (r *Router) addRoute(pattern string, method string, handlers ...HandlerFunc) {
-	assert(len(handlers) > 0, "You must pass in at least one handler function")
-
+func (r *Router) addRoute(pattern string, method string, handler HandlerFunc, middleware ...MiddlewareFunc) {
 	r.routes = append(r.routes, route{
-		compileRegex(pattern),
-		handlers[len(handlers)-1],
-		method,
-		createMiddleware(handlers...)[:len(handlers)-1]})
+		pattern:    compileRegex(pattern),
+		handler:    handler,
+		method:     method,
+		middleware: middleware})
 }
 
 // Create a new router group.
-func (r *Router) Group(prefix string, middleware ...HandlerFunc) *RouterGroup {
-	return &RouterGroup{r, prefix, createMiddleware(middleware...)}
+func (r *Router) Group(prefix string, middleware ...MiddlewareFunc) *RouterGroup {
+	return &RouterGroup{router: r, prefix: prefix, middleware: middleware}
 }
 
 // Serves the http request. Implements the http.Handler interface.
 func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
-	// Initialize the context
+	// Initialize the context the wraps the request and responseWriter.
 	ctx := &Context{
 		Request:   req,
-		Response:  w,
+		Response:  &Writer{ResponseWriter: w},
 		Params:    make(map[string]string),
 		validator: NewValidator(ValidationTag),
 		data:      make(map[string]any),
@@ -176,11 +186,13 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			for _, mw := range middleware {
 				handler = mw(handler)
 			}
+
 			handler(ctx)
 			return
 		}
 	}
 
+	// If a catch-all route is provided, call it before raising a 404
 	if r.notFound != nil {
 		r.notFound(ctx)
 		return
@@ -190,46 +202,45 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	http.NotFound(w, req)
 }
 
-func (r *Router) GET(pattern string, handlers ...HandlerFunc) {
-	r.addRoute(pattern, http.MethodGet, handlers...)
+func (r *Router) GET(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	r.addRoute(pattern, http.MethodGet, handler, middleware...)
 }
 
-func (r *Router) POST(pattern string, handlers ...HandlerFunc) {
-	r.addRoute(pattern, http.MethodPost, handlers...)
+func (r *Router) POST(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	r.addRoute(pattern, http.MethodPost, handler, middleware...)
 }
 
-func (r *Router) PUT(pattern string, handlers ...HandlerFunc) {
-	r.addRoute(pattern, http.MethodPut, handlers...)
+func (r *Router) PUT(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	r.addRoute(pattern, http.MethodPut, handler, middleware...)
 }
 
-func (r *Router) PATCH(pattern string, handlers ...HandlerFunc) {
-	r.addRoute(pattern, http.MethodPatch, handlers...)
+func (r *Router) PATCH(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	r.addRoute(pattern, http.MethodPatch, handler, middleware...)
 }
 
-func (r *Router) DELETE(pattern string, handlers ...HandlerFunc) {
-	r.addRoute(pattern, http.MethodDelete, handlers...)
+func (r *Router) DELETE(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	r.addRoute(pattern, http.MethodDelete, handler, middleware...)
 }
 
-func (r *Router) OPTIONS(pattern string, handlers ...HandlerFunc) {
-	r.addRoute(pattern, http.MethodOptions, handlers...)
+func (r *Router) OPTIONS(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	r.addRoute(pattern, http.MethodOptions, handler, middleware...)
 }
 
-func (r *Router) CONNECT(pattern string, handlers ...HandlerFunc) {
-	r.addRoute(pattern, http.MethodConnect, handlers...)
+func (r *Router) CONNECT(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	r.addRoute(pattern, http.MethodConnect, handler, middleware...)
 }
 
-func (r *Router) TRACE(pattern string, handlers ...HandlerFunc) {
-	r.addRoute(pattern, http.MethodTrace, handlers...)
+func (r *Router) TRACE(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	r.addRoute(pattern, http.MethodTrace, handler, middleware...)
 }
 
-func (r *Router) HEAD(pattern string, handlers ...HandlerFunc) {
-	r.addRoute(pattern, http.MethodHead, handlers...)
+func (r *Router) HEAD(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	r.addRoute(pattern, http.MethodHead, handler, middleware...)
 }
 
 // Connect a handler to be called if no pattern matches the request path.
-func (r *Router) NotFound(handler HandlerFunc) {
-	// Global router middleware
-	for _, mw := range r.middleware {
+func (r *Router) NotFound(handler HandlerFunc, middleware ...MiddlewareFunc) {
+	for _, mw := range append(r.middleware, middleware...) {
 		handler = mw(handler)
 	}
 	r.notFound = handler
@@ -244,6 +255,7 @@ func (r *Router) NotFound(handler HandlerFunc) {
 func (r *Router) Static(root, dirname, stripPrefix string) {
 	handler := http.StripPrefix(stripPrefix, http.FileServer(http.Dir(dirname)))
 	handlerFunc := func(ctx *Context) {
+		ctx.Response.WriteHeader(http.StatusOK)
 		handler.ServeHTTP(ctx.Response, ctx.Request)
 	}
 
@@ -312,9 +324,8 @@ func (r *Router) StaticEmbedFS(staticEmbed StaticEmbed) {
 					return
 				}
 
-				// File not found. Let the client-side router handle the file
-				ctx.Status(http.StatusAccepted)
-				ctx.HTML(http.StatusOK, string(index))
+				ctx.Response.WriteHeader(http.StatusOK)
+				ctx.HTML(string(index))
 			} else {
 				// IO Error
 				http.Error(ctx.Response, "something wrong happened!!", http.StatusInternalServerError)
@@ -326,6 +337,7 @@ func (r *Router) StaticEmbedFS(staticEmbed StaticEmbed) {
 		f.Close()
 
 		// File exists let the fileServer handler deal with it
+		// ctx.Response.WriteHeader(http.StatusOK)
 		handler.ServeHTTP(ctx.Response, ctx.Request)
 	}
 
@@ -338,77 +350,6 @@ func (r *Router) StaticEmbedFS(staticEmbed StaticEmbed) {
 
 func (r *Router) Routes() []route {
 	return r.routes
-}
-
-func pathPrefixToRegex(pathPrefix string) (string, error) {
-	// Split the path prefix into its individual segments
-	segments := strings.Split(pathPrefix, "/")
-
-	// Initialize the regular expression
-	regex := "^/"
-
-	// Iterate through the segments
-	numSigments := len(segments)
-	for index, segment := range segments {
-		// Check if the segment is a path parameter
-		if strings.Contains(segment, "{") && strings.Contains(segment, "}") {
-			// Extract the parameter name from the segment
-			paramName := segment[1 : len(segment)-1]
-
-			// Check if the parameter has a type specified
-			if strings.Contains(paramName, ":") {
-				// Extract the parameter name and type from the segment
-				var paramType string
-				params := strings.Split(paramName, ":")
-				paramName = params[0]
-				paramType = params[1]
-
-				// Check the parameter type and add the corresponding regular expression to the regex
-				if paramType == "int" {
-					regex += "(?P<" + paramName + ">\\d+)"
-				} else if paramType == "str" {
-					regex += "(?P<" + paramName + ">\\w+)"
-				} else if paramType == "float" {
-					regex += "(?P<" + paramName + ">\\d+\\.\\d+)"
-				} else if paramType == "bool" {
-					regex += "(?P<" + paramName + ">true|false)"
-				} else if paramType == "date" {
-					regex += "(?P<" + paramName + ">\\d{4}-\\d{2}-\\d{2})"
-				} else if paramType == "datetime" {
-					regex += "(?P<" + paramName + ">\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2})"
-				} else {
-					return "", errors.New("invalid parameter type: " + paramType)
-				}
-			} else {
-				// The parameter has no type specified, so consider it a string
-				regex += "(?P<" + paramName + ">\\w+)"
-			}
-		} else {
-			// Add the segment to the regex as is
-			regex += segment
-		}
-
-		if index < numSigments-1 && segment != "" {
-			regex += "/"
-		}
-	}
-
-	// Add trailing slash if StrictSlash and path does not end in /
-	if StrictSlash && len(regex) > 2 && regex[len(regex)-1] != '/' {
-		regex += "/"
-	}
-
-	// Add the end anchor to the regex
-	regex += "$"
-	return regex, nil
-}
-
-func compileRegex(pat string) *regexp.Regexp {
-	regex, err := pathPrefixToRegex(pat)
-	if err != nil {
-		panic(err)
-	}
-	return regexp.MustCompile(regex)
 }
 
 // Write data to a temporary file with given name.

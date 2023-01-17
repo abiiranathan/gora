@@ -12,12 +12,13 @@ WebsocketHandler maintains the set of active clients and broadcasts messages to 
 clients.
 
 WebsocketHandler implements http.Handler interface and can be used directly in your http
-routes.
+routes. Don't forget to call the Run method in a seperate go routine.
 
 	hub, quit := ws.NewHandler()
 	defer quit()
 
 	go hub.Run()
+
 	http.Handle("/", http.FileServer(http.Dir("public")))
 	http.Handle("/ws", hub)
 	log.Fatal(http.ListenAndServe(":8080", nil))
@@ -35,6 +36,9 @@ type WebsocketHandler struct {
 	onmessage func([]byte)
 	// channel to signal exit
 	done chan struct{}
+
+	// Broadcast Message to all connected clients?.
+	broadcastMessages bool
 }
 
 type HubOption func(*WebsocketHandler)
@@ -45,14 +49,25 @@ func OnMessage(f func(msg []byte)) HubOption {
 	}
 }
 
+func NoBroadcast() HubOption {
+	return func(wh *WebsocketHandler) {
+		wh.broadcastMessages = false
+	}
+}
+
+// Returns a new websocker hundler.
+// By default, this handler broadcasts all messages to connected clients
+// as in a chat. If you want to handle each message yourself, pass in an OnMessage Option and NoBroadcast option.
+// Then call BroadCastMessage on this handler to send the message to all clients.
 func NewHandler(options ...HubOption) (handler *WebsocketHandler, quit func()) {
 	h := &WebsocketHandler{
-		broadcast:  make(chan []byte),
-		register:   make(chan *Client),
-		unregister: make(chan *Client),
-		clients:    make(map[*Client]bool),
-		onmessage:  nil,
-		done:       make(chan struct{}),
+		broadcast:         make(chan []byte),
+		register:          make(chan *Client),
+		unregister:        make(chan *Client),
+		clients:           make(map[*Client]bool),
+		onmessage:         nil,
+		done:              make(chan struct{}),
+		broadcastMessages: true,
 	}
 
 	for _, opt := range options {
@@ -81,7 +96,7 @@ func (h *WebsocketHandler) Run() {
 				h.removeClient(client)
 			}
 		case message := <-h.broadcast:
-			h.broadCastMessage(message)
+			h.BroadCastMessage(message)
 			if h.onmessage != nil {
 				h.onmessage(message)
 			}
@@ -98,7 +113,7 @@ func (h *WebsocketHandler) Run() {
 
 // send message to all active clients.
 // Client who can't recv are closed and deleted from the client map
-func (h *WebsocketHandler) broadCastMessage(message []byte) {
+func (h *WebsocketHandler) BroadCastMessage(message []byte) {
 	for client := range h.clients {
 		select {
 		case client.send <- message:

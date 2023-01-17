@@ -10,13 +10,13 @@ import (
 
 // UserLoader function loads user from the database given the id.
 // Returns the user and an error if user can not be loaded or user is not active.
-type UserLoader func(userId uint) (user any, err error)
+type UserLoader[T any] func(userId uint) (user T, err error)
 
 /*
 LoginRequired when called with secretKey and userLoader creates a jwt
 middleware that automatically extracts jwt from the request header,
 verifies it fetches the user using the userLoader function and attaches it to the context
-with the key "user"
+with the key "user". You can access the user downstream from the context and cast it
 Usage:
 
 	secretKey := os.Getenv("SECRET_KEY")
@@ -28,7 +28,7 @@ Usage:
 	r := gora.Default()
 	r.Use(AuthMiddleware)
 */
-func LoginRequired(secretKey string, userLoader UserLoader) gora.MiddlewareFunc {
+func LoginRequired[T any](secretKey string, userLoader UserLoader[T]) gora.MiddlewareFunc {
 	tokener := auth.NewJWT(secretKey)
 
 	return func(next gora.HandlerFunc) gora.HandlerFunc {

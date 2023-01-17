@@ -10,53 +10,51 @@ type RouterGroup struct {
 	middleware []MiddlewareFunc
 }
 
-func (g *RouterGroup) addRoute(pattern string, method string, handlers ...HandlerFunc) {
-	assert(len(handlers) > 0, "You must pass in at least one handler function")
-
+func (g *RouterGroup) addRoute(pattern string, method string, handler HandlerFunc, middleware ...MiddlewareFunc) {
 	g.router.routes = append(g.router.routes, route{
-		compileRegex(pattern),
-		handlers[len(handlers)-1],
-		method,
-		createMiddleware(handlers...)[:len(handlers)-1]})
+		pattern:    compileRegex(pattern),
+		handler:    handler,
+		method:     method,
+		middleware: middleware})
 }
 
-func (g *RouterGroup) Use(middleware ...HandlerFunc) {
-	g.middleware = append(g.middleware, createMiddleware(middleware...)...)
+func (g *RouterGroup) Use(middleware ...MiddlewareFunc) {
+	g.middleware = append(g.middleware, middleware...)
 }
 
-func (g *RouterGroup) GET(pattern string, handlers ...HandlerFunc) {
-	g.addRoute(g.prefix+pattern, http.MethodGet, handlers...)
+func (g *RouterGroup) GET(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	g.addRoute(g.prefix+pattern, http.MethodGet, handler, middleware...)
 }
 
-func (g *RouterGroup) POST(pattern string, handlers ...HandlerFunc) {
-	g.addRoute(g.prefix+pattern, http.MethodPost, handlers...)
+func (g *RouterGroup) POST(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	g.addRoute(g.prefix+pattern, http.MethodPost, handler, middleware...)
 }
 
-func (g *RouterGroup) PUT(pattern string, handlers ...HandlerFunc) {
-	g.addRoute(g.prefix+pattern, http.MethodPut, handlers...)
+func (g *RouterGroup) PUT(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	g.addRoute(g.prefix+pattern, http.MethodPut, handler, middleware...)
 }
 
-func (g *RouterGroup) PATCH(pattern string, handlers ...HandlerFunc) {
-	g.addRoute(g.prefix+pattern, http.MethodPatch, handlers...)
+func (g *RouterGroup) PATCH(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	g.addRoute(g.prefix+pattern, http.MethodPatch, handler, middleware...)
 }
 
-func (g *RouterGroup) DELETE(pattern string, handlers ...HandlerFunc) {
-	g.addRoute(g.prefix+pattern, http.MethodDelete, handlers...)
+func (g *RouterGroup) DELETE(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	g.addRoute(g.prefix+pattern, http.MethodDelete, handler, middleware...)
 }
 
 // Other methods
-func (g *RouterGroup) OPTIONS(pattern string, handlers ...HandlerFunc) {
-	g.addRoute(g.prefix+pattern, http.MethodOptions, handlers...)
+func (g *RouterGroup) OPTIONS(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	g.addRoute(g.prefix+pattern, http.MethodOptions, handler, middleware...)
 }
 
-func (g *RouterGroup) CONNECT(pattern string, handlers ...HandlerFunc) {
-	g.addRoute(g.prefix+pattern, http.MethodConnect, handlers...)
+func (g *RouterGroup) CONNECT(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	g.addRoute(g.prefix+pattern, http.MethodConnect, handler, middleware...)
 }
 
-func (g *RouterGroup) TRACE(pattern string, handlers ...HandlerFunc) {
-	g.addRoute(g.prefix+pattern, http.MethodTrace, handlers...)
+func (g *RouterGroup) TRACE(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	g.addRoute(g.prefix+pattern, http.MethodTrace, handler, middleware...)
 }
 
-func (g *RouterGroup) HEAD(pattern string, handlers ...HandlerFunc) {
-	g.addRoute(g.prefix+pattern, http.MethodHead, handlers...)
+func (g *RouterGroup) HEAD(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
+	g.addRoute(g.prefix+pattern, http.MethodHead, handler, middleware...)
 }

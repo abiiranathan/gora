@@ -110,5 +110,5 @@ func IsValidEmail(email string) bool {
 // as JSON.
 func (c *Context) ValidationError(err validator.ValidationErrors) {
 	errMap := c.validator.TranslateErrors(err)
-	c.JSON(http.StatusBadRequest, errMap)
+	c.Status(http.StatusBadRequest).JSON(errMap)
 }

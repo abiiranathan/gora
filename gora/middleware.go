@@ -6,24 +6,37 @@ import (
 	"time"
 
 	"github.com/mileusna/useragent"
+	"github.com/rs/zerolog"
 )
 
 // Custom server recovery middleware.
-func RecoveryMiddleware(next HandlerFunc) HandlerFunc {
+func Recovery(next HandlerFunc) HandlerFunc {
 	return func(ctx *Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				ctx.Logger.Info().Err(err.(error)).Msg("panic")
-				http.Error(ctx.Response, "InternalServerError", http.StatusInternalServerError)
+				switch val := err.(type) {
+				case string:
+					ctx.Logger.Info().Str("message", val).Msg("internal server error")
+					ctx.Status(http.StatusInternalServerError).HTML(val)
+				case error:
+					ctx.Logger.Info().Str("message", val.Error()).Msg("internal server error")
+					ctx.Status(http.StatusInternalServerError).HTML(val.Error())
+				default:
+					ctx.Logger.Info().Interface("message", val).Msg("internal server error")
+					ctx.Status(http.StatusInternalServerError).HTML("Something went wrong!")
+				}
 			}
 		}()
+
 		next(ctx)
 	}
 }
 
 // A simple logging middleware.
 // Logs the Request Method, Path, IP, Browser, Latency.
-func LoggerMiddleware(next HandlerFunc) HandlerFunc {
+func Logger(next HandlerFunc) HandlerFunc {
+	zerolog.TimeFieldFormat = time.RFC3339
+
 	return func(ctx *Context) {
 		ua := useragent.Parse(ctx.Request.Header.Get("User-Agent"))
 		// Get the IP address of the client
@@ -44,6 +57,7 @@ func LoggerMiddleware(next HandlerFunc) HandlerFunc {
 		ctx.Logger.Info().
 			Str("method", ctx.Request.Method).
 			Str("path", ctx.Request.URL.Path).
+			Int("statusCode", ctx.StatusCode()).
 			Str("ip", ip).
 			Str("browser", ua.Name).
 			Str("device", ua.Device).
@@ -54,31 +68,16 @@ func LoggerMiddleware(next HandlerFunc) HandlerFunc {
 	}
 }
 
-// Wraps a standard http.HandlerFunc and returns HandlerFunc
-// that this router expects.
-func WrapHttpHandler(h http.Handler) HandlerFunc {
+// Wraps a standard http.Handler.
+func WrapH(h http.Handler) HandlerFunc {
 	return func(ctx *Context) {
 		h.ServeHTTP(ctx.Response, ctx.Request)
 	}
 }
 
-// Wraps a standard http.HandlerFunc and returns HandlerFunc
-// that this router expects.
-func WrapHttpHandlerFunc(h http.HandlerFunc) HandlerFunc {
+// Wraps a standard http.HandlerFunc.
+func WrapHF(h http.HandlerFunc) HandlerFunc {
 	return func(ctx *Context) {
 		h(ctx.Response, ctx.Request)
 	}
-}
-
-func createMiddleware(handlers ...HandlerFunc) []MiddlewareFunc {
-	funcs := make([]MiddlewareFunc, 0, len(handlers))
-	for _, hf := range handlers {
-		funcs = append(funcs, func(next HandlerFunc) HandlerFunc {
-			return func(ctx *Context) {
-				hf(ctx)
-			}
-		})
-	}
-
-	return funcs
 }

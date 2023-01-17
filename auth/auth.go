@@ -42,18 +42,23 @@ type JWT struct {
 
 type JWTOption func(*JWT)
 
+// Configure the JWT signing method. The default is jwt.SigningMethodHS256
 func SigningMethod(method jwt.SigningMethod) JWTOption {
 	return func(j *JWT) {
 		j.signingMethod = method
 	}
 }
 
+// Configure the expiry of the JWT token.
 func ExpiresAfter(expiresAfter time.Duration) JWTOption {
 	return func(j *JWT) {
 		j.expireAfter = expiresAfter
 	}
 }
 
+// Creates a new Tokener interface with default expiry of 72 hours.
+// Customize this by passing in functional options of type JWTOption.
+// secretKey is a required secure token.
 func NewJWT(secretKey string, options ...JWTOption) Tokener {
 	jwtoken := &JWT{
 		signingMethod: jwt.SigningMethodHS256,

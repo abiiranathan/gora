@@ -23,14 +23,37 @@ import (
 	"github.com/rs/zerolog"
 )
 
+var (
+	ErrEmptyRequestBody = errors.New("empty request body")
+)
+
 // Maximum memory in bytes for file uploads
 var MaxMultipartMemory int64 = 32 << 20
 
+type Map map[string]any
+
+type Writer struct {
+	statusCode    int
+	headerWritten bool
+	http.ResponseWriter
+}
+
+// Implement WriteHeader to intercept the statusCode of the request for logging.
+func (w *Writer) WriteHeader(statusCode int) {
+	if w.headerWritten && statusCode != 0 {
+		return
+	}
+
+	w.statusCode = statusCode
+	w.ResponseWriter.WriteHeader(w.statusCode)
+	w.headerWritten = true
+}
+
 // Context encapsulates request/response operations.
 type Context struct {
-	Request  *http.Request       // Incoming request
-	Response http.ResponseWriter // http response writer
-	Params   map[string]string   // Path parameters
+	Request  *http.Request     // Incoming request
+	Response *Writer           // http response writer
+	Params   map[string]string // Path parameters
 
 	// Signal that request has been aborted
 	aborted bool
@@ -45,20 +68,20 @@ type Context struct {
 	data map[string]any
 
 	// Logger
-	Logger *zerolog.Logger
+	Logger zerolog.Logger
 }
 
 // Returns a query parameter by key.
-func (ctx *Context) Query(key string) string {
-	return ctx.Request.URL.Query().Get(key)
+func (c *Context) Query(key string) string {
+	return c.Request.URL.Query().Get(key)
 }
 
 var ErrInvalidParam = errors.New("invalid url parameter")
 
 // Get parameter as an integer. If key does not exist
 // not a valid integer, sends a 401 http response.
-func (ctx *Context) IntParam(key string) (int, error) {
-	if val, ok := ctx.Params[key]; ok {
+func (c *Context) IntParam(key string) (int, error) {
+	if val, ok := c.Params[key]; ok {
 		valInt, err := strconv.Atoi(val)
 		if err != nil {
 			return 0, ErrInvalidParam
@@ -70,8 +93,8 @@ func (ctx *Context) IntParam(key string) (int, error) {
 
 // Get parameter as an integer. If key does not exist
 // not a valid integer, IntParam panics.
-func (ctx *Context) UintParam(key string) (uint, error) {
-	if val, ok := ctx.Params[key]; ok {
+func (c *Context) UintParam(key string) (uint, error) {
+	if val, ok := c.Params[key]; ok {
 		valInt, err := strconv.Atoi(val)
 		if err != nil {
 			return 0, ErrInvalidParam
@@ -83,8 +106,8 @@ func (ctx *Context) UintParam(key string) (uint, error) {
 
 // Get parameter as an integer. If key does not exist
 // not a valid integer, IntParam panics.
-func (ctx *Context) IntQuery(key string) (int, error) {
-	val := ctx.Query(key)
+func (c *Context) IntQuery(key string) (int, error) {
+	val := c.Query(key)
 	valInt, err := strconv.Atoi(val)
 	if err != nil {
 		return 0, ErrInvalidParam
@@ -95,8 +118,8 @@ func (ctx *Context) IntQuery(key string) (int, error) {
 
 // Get parameter as an integer. If key does not exist
 // not a valid integer, IntParam panics.
-func (ctx *Context) UintQuery(key string) (uint, error) {
-	val := ctx.Query(key)
+func (c *Context) UintQuery(key string) (uint, error) {
+	val := c.Query(key)
 	valInt, err := strconv.Atoi(val)
 	if err != nil {
 		return 0, ErrInvalidParam
@@ -105,105 +128,97 @@ func (ctx *Context) UintQuery(key string) (uint, error) {
 }
 
 // Set value onto the context. Goroutine safe.
-func (ctx *Context) Set(key string, value any) {
-	ctx.mu.Lock()
-	defer ctx.mu.Unlock()
+func (c *Context) Set(key string, value any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	ctx.data[key] = value
+	c.data[key] = value
 }
 
 // Get value from the context. Goroutine safe.
-func (ctx *Context) Get(key string) (value any, ok bool) {
-	ctx.mu.RLock()
-	defer ctx.mu.RUnlock()
+func (c *Context) Get(key string) (value any, ok bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
-	value, ok = ctx.data[key]
+	value, ok = c.data[key]
 	return value, ok
 }
 
 // Get value from the context or panic if value not in context. Goroutine safe.
-func (ctx *Context) MustGet(key string) (value any) {
-	ctx.mu.RLock()
-	defer ctx.mu.RUnlock()
+func (c *Context) MustGet(key string) (value any) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
-	if value, ok := ctx.data[key]; ok {
+	if value, ok := c.data[key]; ok {
 		return value
 	}
 
 	panic("value for key " + key + " not found in the context")
 }
 
-// Write the status of the response.
-func (ctx *Context) Status(statusCode int) *Context {
-	ctx.Response.WriteHeader(statusCode)
-	return ctx
+// Write the status code of the response.
+// Chainable.
+func (c *Context) Status(statusCode int) *Context {
+	c.Response.WriteHeader(statusCode)
+	return c
 }
 
 // Write the data into the response.
 // Makes Context a Writer interface.
-func (ctx *Context) Write(data []byte) (int, error) {
-	return ctx.Response.Write(data)
+func (c *Context) Write(data []byte) (int, error) {
+	return c.Response.Write(data)
+}
+
+func (c *Context) StatusCode() int {
+	return c.Response.statusCode
 }
 
 // Read the request body into buffer p.
 // Makes Context a Reader interface.
-func (ctx *Context) Read(p []byte) (int, error) {
-	return ctx.Request.Body.Read(p)
+func (c *Context) Read(p []byte) (int, error) {
+	return c.Request.Body.Read(p)
 }
 
 // Send encoded JSON response.
 // Sets conent-type header as application/json.
-func (ctx *Context) JSON(status int, data any) {
+func (c *Context) JSON(data any) {
 	b, err := json.Marshal(data)
 	if err != nil {
 		panic(err)
 	}
 
-	ctx.Response.WriteHeader(status)
-	ctx.Response.Header().Set("Content-Type", "application/json")
-	ctx.Response.Write(b)
-
-	if flusher, ok := ctx.Response.(http.Flusher); ok {
-		flusher.Flush()
-	}
+	c.Response.Header().Set("Content-Type", "application/json")
+	c.Response.Write(b)
 }
 
 // Send binary data as response.
 // Sets appropriate content-type as application/octet-stream.
-func (ctx *Context) Binary(status int, data []byte) {
-	ctx.Response.WriteHeader(status)
-	ctx.Response.Header().Set("Content-Type", "application/octet-stream")
-	ctx.Response.Write(data)
+func (c *Context) Binary(data []byte) {
+	c.Response.Header().Set("Content-Type", "application/octet-stream")
+	c.Response.Write(data)
 }
 
 // Send a text response as text/plain.
-func (ctx *Context) Text(status int, text string) {
-	ctx.Response.WriteHeader(status)
-	ctx.Response.Header().Set("Content-Type", "text/plain")
-	ctx.Response.Write([]byte(text))
-
-	if flusher, ok := ctx.Response.(http.Flusher); ok {
-		flusher.Flush()
-	}
+func (c *Context) String(text string) {
+	c.Response.Header().Set("Content-Type", "text/plain")
+	c.Response.Write([]byte(text))
 }
 
 // Send an HTML response as text/html.
-func (ctx *Context) HTML(status int, html string) {
-	ctx.Response.WriteHeader(status)
-	ctx.Response.Header().Set("Content-Type", "text/html")
-	ctx.Response.Write([]byte(html))
+func (c *Context) HTML(html string) {
+	c.Response.WriteHeader(http.StatusOK)
+	c.Response.Header().Set("Content-Type", "text/html")
+	c.Response.Write([]byte(html))
 }
 
-// Send a file at filePath as a binary response with content-type application/octet-stream.
-// If the file exists, it sends a 200 statusCode otherwise, it sends a 404 instead of panic.
-// Will panic if io.Copy of file into ResponseWriter fails.
-func (ctx *Context) File(filePath string) {
-	http.ServeFile(ctx.Response, ctx.Request, filePath)
+// Send a file at filePath as a binary response with http.ServeFile
+func (c *Context) File(filePath string) {
+	http.ServeFile(c.Response, c.Request, filePath)
 }
 
 // Render a template/templates using template.ParseFiles using data
 // and sends the resulting output as a text/html response.
-func (ctx *Context) Render(status int, data any, filenames ...string) {
+func (c *Context) Render(status int, data any, filenames ...string) {
 	tpl, err := template.ParseFiles(filenames...)
 	if err != nil {
 		panic(err)
@@ -215,75 +230,80 @@ func (ctx *Context) Render(status int, data any, filenames ...string) {
 		panic(err)
 	}
 
-	ctx.Response.WriteHeader(status)
-	ctx.Response.Header().Set("Content-Type", "text/html")
-	ctx.Response.Write(buf.Bytes())
+	c.Response.WriteHeader(status)
+	c.Response.Header().Set("Content-Type", "text/html")
+	c.Response.Write(buf.Bytes())
 }
 
 // Redirect the client to a different URL.
 // Sets redirect code to http.StatusMovedPermanently.
-func (ctx *Context) Redirect(url string) {
-	http.Redirect(ctx.Response, ctx.Request, url, http.StatusMovedPermanently)
+func (c *Context) Redirect(url string) {
+	http.Redirect(c.Response, c.Request, url, http.StatusMovedPermanently)
 }
 
 // Abort the request and cancel all processing down the middleware chain.
 // Sends a response with the given status code and message.
-func (ctx *Context) Abort(status int, message string) {
-	ctx.Response.WriteHeader(status)
-	ctx.Response.Write([]byte(message))
+func (c *Context) Abort(status int, message string) {
+	c.Response.WriteHeader(status)
+	c.Response.Write([]byte(message))
 	// Set a flag on the context to indicate that the request has been aborted
-	ctx.aborted = true
+	c.aborted = true
 }
 
 // Abort the request and cancel all processing down the middleware chain.
 // Sends a response with the given status code and message.
-func (ctx *Context) AbortWithError(status int, err error) {
-	ctx.Response.WriteHeader(status)
-	ctx.Response.Write([]byte(err.Error()))
+func (c *Context) AbortWithError(status int, err error) {
+	c.Response.WriteHeader(status)
+	c.Response.Write([]byte(err.Error()))
 
 	// Set a flag on the context to indicate that the request has been aborted
-	ctx.aborted = true
+	c.aborted = true
 }
 
 // Bind the request body to a struct.
-func (ctx *Context) BindJSON(v any) error {
-	decoder := json.NewDecoder(ctx.Request.Body)
+func (c *Context) BindJSON(v any) error {
+	decoder := json.NewDecoder(c.Request.Body)
 	return decoder.Decode(v)
 
 }
 
 // Validates structs, pointers to structs and slices/arrays of structs.
 // Validate will panic if obj is not struct, slice, array or pointers to the same.
-func (ctx *Context) Validate(v any) validator.ValidationErrors {
-	return ctx.validator.Validate(v)
+func (c *Context) Validate(v any) validator.ValidationErrors {
+	return c.validator.Validate(v)
 }
 
-// Alias to ctx.BindJSON followed by ctx.Validate.
+// Alias to c.BindJSON followed by c.Validate.
 // Panics if BindJSON on v fails.
-func (ctx *Context) MustBindJSON(v any) validator.ValidationErrors {
-	err := ctx.BindJSON(v)
+func (c *Context) MustBindJSON(v any) validator.ValidationErrors {
+	err := c.BindJSON(v)
+
 	if err != nil {
-		panic("unable to bind JSON: " + err.Error())
+		if errors.Is(err, io.EOF) {
+			panic(ErrEmptyRequestBody)
+		}
+		panic(err)
 	}
-	return ctx.validator.Validate(v)
+
+	return c.validator.Validate(v)
 }
 
-func (ctx *Context) BindXML(v any) error {
-	decoder := xml.NewDecoder(ctx.Request.Body)
+func (c *Context) BindXML(v any) error {
+	decoder := xml.NewDecoder(c.Request.Body)
 	return decoder.Decode(v)
 }
 
-// Alias to ctx.BindXML followed by ctx.Validate.
+// Alias to c.BindXML followed by c.Validate.
 // Panics if BindXML on v fails.
 // v should be a pointer to struct, slice or array.
-func (ctx *Context) MustBindXML(v any) validator.ValidationErrors {
-	decoder := xml.NewDecoder(ctx.Request.Body)
+func (c *Context) MustBindXML(v any) validator.ValidationErrors {
+	decoder := xml.NewDecoder(c.Request.Body)
 	err := decoder.Decode(v)
 	if err != nil {
 		panic(err)
 	}
 
-	return ctx.Validate(v)
+	return c.Validate(v)
 }
 
 /*
@@ -293,18 +313,18 @@ representing the uploaded files.
 
 Max Memory used is 32 << 20.
 */
-func (ctx *Context) ParseMultipartForm() (map[string][]string, map[string][]*multipart.FileHeader, error) {
-	if err := ctx.Request.ParseMultipartForm(MaxMultipartMemory); err != nil {
+func (c *Context) ParseMultipartForm() (map[string][]string, map[string][]*multipart.FileHeader, error) {
+	if err := c.Request.ParseMultipartForm(MaxMultipartMemory); err != nil {
 		return nil, nil, err
 	}
 
 	formValues := make(map[string][]string)
-	for key, values := range ctx.Request.MultipartForm.Value {
+	for key, values := range c.Request.MultipartForm.Value {
 		formValues[key] = values
 	}
 
 	formFiles := make(map[string][]*multipart.FileHeader)
-	for key, files := range ctx.Request.MultipartForm.File {
+	for key, files := range c.Request.MultipartForm.File {
 		formFiles[key] = files
 	}
 	return formValues, formFiles, nil
@@ -312,13 +332,13 @@ func (ctx *Context) ParseMultipartForm() (map[string][]string, map[string][]*mul
 
 // Save multiple multipart files to disk.
 // Returns filenames of the saved files and an error if any of the os/io operations fail.
-func (ctx *Context) SaveMultipartFiles(formFiles map[string][]*multipart.FileHeader,
+func (c *Context) SaveMultipartFiles(formFiles map[string][]*multipart.FileHeader,
 	destDir string) (filnames []string, err error) {
 	filenames := make([]string, 0)
 
 	for _, files := range formFiles {
 		for _, file := range files {
-			filename, err := ctx.SaveMultipartFile(file, destDir)
+			filename, err := c.SaveMultipartFile(file, destDir)
 			if err != nil {
 				return nil, err
 			}
@@ -340,12 +360,12 @@ func randString(length int) string {
 
 // Parse a single file from the request body.
 // If no file exists for the field name, returns an error.
-func (ctx *Context) ParseMultipartFile(fieldName string) (*multipart.FileHeader, error) {
-	if err := ctx.Request.ParseMultipartForm(MaxMultipartMemory); err != nil {
+func (c *Context) ParseMultipartFile(fieldName string) (*multipart.FileHeader, error) {
+	if err := c.Request.ParseMultipartForm(MaxMultipartMemory); err != nil {
 		return nil, err
 	}
 
-	files, ok := ctx.Request.MultipartForm.File[fieldName]
+	files, ok := c.Request.MultipartForm.File[fieldName]
 	if !ok || len(files) == 0 {
 		return nil, fmt.Errorf("file with field name %s not found", fieldName)
 	}
@@ -354,7 +374,7 @@ func (ctx *Context) ParseMultipartFile(fieldName string) (*multipart.FileHeader,
 
 // Save the multipart file to disk using a random name into destDir directory.
 // Returns the path to the destination filename and error if any.
-func (ctx *Context) SaveMultipartFile(file *multipart.FileHeader, destDir string) (string, error) {
+func (c *Context) SaveMultipartFile(file *multipart.FileHeader, destDir string) (string, error) {
 	src, err := file.Open()
 	if err != nil {
 		return "", err
@@ -414,8 +434,8 @@ func TransformRequestBody(req *http.Request, rules map[string]TransformRule) err
 
 // Extract Bearer Token from Authorization header.
 // If the token is not in the correct format: Bearer xxxxxxx, returns an empty string.
-func (ctx *Context) BearerToken() string {
-	authorization := ctx.Request.Header.Get("Authorization")
+func (c *Context) BearerToken() string {
+	authorization := c.Request.Header.Get("Authorization")
 	parts := strings.SplitN(authorization, " ", 2)
 	if len(parts) != 2 || parts[0] != "Bearer" {
 		return ""
