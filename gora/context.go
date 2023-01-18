@@ -156,6 +156,10 @@ func (c *Context) MustGet(key string) (value any) {
 	panic("value for key " + key + " not found in the context")
 }
 
+func (c *Context) Header(key string, value string) {
+	c.Response.Header().Set(key, value)
+}
+
 // Write the status code of the response.
 // Chainable.
 func (c *Context) Status(statusCode int) *Context {
@@ -264,7 +268,6 @@ func (c *Context) AbortWithError(status int, err error) {
 func (c *Context) BindJSON(v any) error {
 	decoder := json.NewDecoder(c.Request.Body)
 	return decoder.Decode(v)
-
 }
 
 // Validates structs, pointers to structs and slices/arrays of structs.
@@ -302,7 +305,6 @@ func (c *Context) MustBindXML(v any) validator.ValidationErrors {
 	if err != nil {
 		panic(err)
 	}
-
 	return c.Validate(v)
 }
 
@@ -379,6 +381,7 @@ func (c *Context) SaveMultipartFile(file *multipart.FileHeader, destDir string) 
 	if err != nil {
 		return "", err
 	}
+
 	defer src.Close()
 
 	// Add randomness to the filename to avoid collisions
@@ -394,42 +397,6 @@ func (c *Context) SaveMultipartFile(file *multipart.FileHeader, destDir string) 
 	}
 
 	return filename, nil
-}
-
-type TransformRule func(interface{}) (interface{}, error)
-
-// This function takes an http.Request and a map of transformation rules as arguments.
-// The transformation rules are represented by the TransformRule type,
-// which is a function that takes a value of type interface{} and returns
-// the transformed value and an error
-func TransformRequestBody(req *http.Request, rules map[string]TransformRule) error {
-	// Parse the request body as JSON and map it to a map[string]interface{}
-	var body map[string]interface{}
-	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
-		return err
-	}
-
-	// Loop through the rules and apply the transformations
-	for key, rule := range rules {
-		// Check if the key exists in the body
-		if val, ok := body[key]; ok {
-			// Apply the transformation
-			transformedVal, err := rule(val)
-			if err != nil {
-				return err
-			}
-			// Update the value in the body
-			body[key] = transformedVal
-		}
-	}
-
-	// Encode the transformed body back to JSON and update the request body
-	b, err := json.Marshal(body)
-	if err != nil {
-		return err
-	}
-	req.Body = io.NopCloser(bytes.NewReader(b))
-	return nil
 }
 
 // Extract Bearer Token from Authorization header.

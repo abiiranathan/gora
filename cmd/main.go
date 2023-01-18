@@ -17,14 +17,15 @@ type User struct {
 	ID int `json:"id"`
 }
 
+func fetchUser(userId uint) (user User, err error) {
+	return User{ID: 10}, nil
+}
+
 func main() {
 	gora.ModeProduction = false
 	r := gora.Default()
 
-	LoginMiddleware := middleware.LoginRequired("secretKey", func(userId uint) (user User, err error) {
-		return User{ID: 10}, nil
-	})
-
+	LoginMiddleware := middleware.LoginRequired("secretKey", fetchUser)
 	tokener := auth.NewJWT("secretKey")
 
 	api := r.Group("/api")

@@ -2,6 +2,7 @@ package gora
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,5 +80,86 @@ func WrapH(h http.Handler) HandlerFunc {
 func WrapHF(h http.HandlerFunc) HandlerFunc {
 	return func(ctx *Context) {
 		h(ctx.Response, ctx.Request)
+	}
+}
+
+// CorsConfig is the configuration struct that sets up the cors middleware.
+// All values are passed to the Headers as provided without special defaults.
+type CorsConfig struct {
+
+	/*
+		The Access-Control-Allow-Origin response header indicates whether the response can be
+		shared with requesting code from the given origin.
+
+		Passing in []string{"*"} will allow all origins
+	*/
+	AllowedOrigins []string
+
+	/*
+		The Access-Control-Allow-Methods response header specifies one or more methods allowed
+		when accessing a resource in response to a preflight request
+	*/
+	AllowedMethods []string
+
+	/*
+		The Access-Control-Allow-Headers response header is used in response to a preflight request
+		which includes the Access-Control-Request-Headers to indicate which HTTP headers can be used
+		 during the actual request
+	*/
+	AllowedHeaders []string
+
+	/*
+		The Access-Control-Expose-Headers response header allows a server to indicate which response headers should be made available to scripts running in the browser, in response to a cross-origin request
+	*/
+	ExposeHeaders []string
+
+	/*
+		The Access-Control-Allow-Credentials response header tells browsers whether to expose the response to the frontend JavaScript code when the request's credentials mode (Request.credentials) is include
+	*/
+	AllowCredentials bool
+
+	/*
+		The Access-Control-Max-Age response header indicates how long the results of a preflight request (that is the information contained in the Access-Control-Allow-Methods and Access-Control-Allow-Headers headers) can be cached.
+	*/
+	MaxAge time.Duration
+}
+
+func (m *CorsConfig) isOriginAllowed(origin string) bool {
+	for _, o := range m.AllowedOrigins {
+		if o == "*" || o == origin {
+			return true
+		}
+	}
+	return false
+}
+
+// Cors middleware.
+// m CorsConfig configures the CORS response headers.
+func Cors(m CorsConfig) MiddlewareFunc {
+	return func(next HandlerFunc) HandlerFunc {
+		return func(c *Context) {
+			origin := c.Request.Header.Get("Origin")
+			if origin == "" || !m.isOriginAllowed(origin) {
+				c.Abort(http.StatusForbidden, "Forbidden")
+				return
+			}
+
+			c.Header("Access-Control-Allow-Origin", origin)
+			c.Header("Access-Control-Allow-Methods", strings.Join(m.AllowedMethods, ","))
+			c.Header("Access-Control-Allow-Headers", strings.Join(m.AllowedHeaders, ","))
+			c.Header("Access-Control-Expose-Headers", strings.Join(m.ExposeHeaders, ","))
+			c.Header("Access-Control-Max-Age", strconv.Itoa(int(m.MaxAge.Seconds())))
+
+			if m.AllowCredentials {
+				c.Header("Access-Control-Allow-Credentials", "true")
+			}
+
+			if c.Request.Method == http.MethodOptions {
+				c.Status(http.StatusOK)
+				return
+			}
+
+			next(c)
+		}
 	}
 }
