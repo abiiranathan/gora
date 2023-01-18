@@ -110,8 +110,8 @@ func LoadConfig(filename string, config interface{}) error {
 
 	for i := 0; i < v.NumField(); i++ {
 		f := v.Type().Field(i)
-		if f.Tag.Get("required") == "true" && !keys[f.Tag.Get("key")] {
-			return fmt.Errorf("missing required field %s", f.Tag.Get("key"))
+		if f.Tag.Get("required") == "true" && !keys[f.Tag.Get("name")] {
+			return fmt.Errorf("missing required field %s", f.Tag.Get("name"))
 		}
 	}
 	return nil
