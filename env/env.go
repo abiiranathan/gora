@@ -56,13 +56,17 @@ func LoadConfig(filename string, config interface{}, converters map[string]Confi
 		}
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
+		var result any
+
 		converter, ok := converters[key]
 		if !ok {
-			continue
-		}
-		result, err := converter(value)
-		if err != nil {
-			return fmt.Errorf("invalid data type conversion for %s: %v", key, err)
+			result = value
+		} else {
+			convertedValue, err := converter(value)
+			if err != nil {
+				return fmt.Errorf("invalid data type conversion for %s: %v", key, err)
+			}
+			result = convertedValue
 		}
 
 		// Set the value in the config value using reflection

@@ -66,6 +66,30 @@ func TestLoadConfig(t *testing.T) {
 		t.Errorf("Expected Key3 to be 'hello', got '%s'", config.Key3)
 	}
 
+	// Test that everything is a string by default is converter not passed
+	type Config struct {
+		Key1 string
+		Key2 string
+		Key3 string
+	}
+
+	conf := &Config{}
+	err = LoadConfig(filename, conf, map[string]ConfigConverter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if conf.Key1 != "123" {
+		t.Errorf("Expected Key1 to be 123, got %s", conf.Key1)
+	}
+	if conf.Key2 != "true" {
+		t.Errorf("Expected Key2 to be true, got %s", conf.Key2)
+	}
+
+	if conf.Key3 != "hello" {
+		t.Errorf("Expected Key3 to be 'hello', got '%s'", conf.Key3)
+	}
+
 }
 
 func TestLoadConfigError(t *testing.T) {
