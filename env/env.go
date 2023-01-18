@@ -39,6 +39,7 @@ func LoadConfig(filename string, config interface{}) error {
 	}
 	defer file.Close()
 
+	keys := make(map[string]bool)
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -49,8 +50,10 @@ func LoadConfig(filename string, config interface{}) error {
 		if len(parts) != 2 {
 			continue
 		}
+
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
+		keys[key] = true
 
 		v := reflect.ValueOf(config)
 		if v.Kind() == reflect.Ptr {
@@ -96,7 +99,22 @@ func LoadConfig(filename string, config interface{}) error {
 		}
 	}
 
-	return scanner.Err()
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+
+	v := reflect.ValueOf(config)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+
+	for i := 0; i < v.NumField(); i++ {
+		f := v.Type().Field(i)
+		if f.Tag.Get("required") == "true" && !keys[f.Tag.Get("key")] {
+			return fmt.Errorf("missing required field %s", f.Tag.Get("key"))
+		}
+	}
+	return nil
 }
 
 // LoadEnv loads the key-value pairs from a configuration file in the '.env'

@@ -2,6 +2,7 @@ package env
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -49,5 +50,35 @@ func TestLoadConfig(t *testing.T) {
 	}
 	if config.Key5 != 456 {
 		t.Errorf("Expected Key5 to be 456, got %d", config.Key5)
+	}
+}
+
+func TestLoadConfigWithRequiredTag(t *testing.T) {
+	// Create a temporary file with some test data
+	file, err := os.CreateTemp("", "config_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(file.Name())
+
+	_, err = file.WriteString("KEY1=value1\nKEY2=123\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Define a struct to hold the config data
+	type Config struct {
+		Key1 string `key:"KEY1"`
+		Key2 int    `key:"KEY2" required:"true"`
+		Key3 string `key:"KEY3" required:"true"`
+	}
+	config := &Config{}
+
+	// Test loading the config file
+	err = LoadConfig(file.Name(), config)
+	if err == nil {
+		t.Error("Expected an error due to missing required field")
+	} else if !strings.Contains(err.Error(), "missing required field KEY3") {
+		t.Errorf("Expected missing required field error for KEY3, got %v", err)
 	}
 }
