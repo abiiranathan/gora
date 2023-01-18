@@ -24,20 +24,15 @@ import (
 	"strings"
 )
 
-type ConfigConverter func(string) (any, error)
-
-// LoadConfig loads the key-value pairs from a configuration file in the '.env'
-// format and parses them into the provided config value. The config value must
-// be a pointer to a struct or map. Converter functions can be provided to
-// specify how each key's value should be parsed.
-//
-// Lines that begin with a '#' character are treated as comments and are
-// ignored. Keys and values may be surrounded by quotes, but this is not
-// required.
-//
-// If the file does not exist or cannot be read, or if a key does not have a
-// corresponding field or key in the config value, an error is returned.
-func LoadConfig(filename string, config interface{}, converters map[string]ConfigConverter) error {
+/*
+The config struct is passed as an argument and the LoadConfig function uses
+reflection to examine the fields of the struct and compare the key name with
+the "name" tag. If a match is found, it uses a switch statement to check the
+field's Kind and parse the value accordingly.
+If the fields are not primitive types or the key is not found in the struct,
+it returns an error.
+*/
+func LoadConfig(filename string, config interface{}) error {
 	file, err := os.Open(filename)
 	if err != nil {
 		return err
@@ -56,36 +51,48 @@ func LoadConfig(filename string, config interface{}, converters map[string]Confi
 		}
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
-		var result any
 
-		converter, ok := converters[key]
-		if !ok {
-			result = value
-		} else {
-			convertedValue, err := converter(value)
-			if err != nil {
-				return fmt.Errorf("invalid data type conversion for %s: %v", key, err)
-			}
-			result = convertedValue
-		}
-
-		// Set the value in the config value using reflection
 		v := reflect.ValueOf(config)
 		if v.Kind() == reflect.Ptr {
 			v = v.Elem()
 		}
 
-		if v.Kind() == reflect.Map {
-			mapKey := reflect.ValueOf(key)
-			v.SetMapIndex(mapKey, reflect.ValueOf(result))
-		} else if v.Kind() == reflect.Struct {
-			field := v.FieldByName(key)
-			if !field.IsValid() {
-				return fmt.Errorf("no field named %s in config struct", key)
+		for i := 0; i < v.NumField(); i++ {
+			f := v.Type().Field(i)
+			if key == f.Tag.Get("name") {
+				field := v.Field(i)
+				switch field.Kind() {
+				case reflect.String:
+					field.SetString(value)
+				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+					intValue, err := strconv.ParseInt(value, 10, 64)
+					if err != nil {
+						return fmt.Errorf("invalid value for %s: %v", key, err)
+					}
+					field.SetInt(intValue)
+				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+					uintValue, err := strconv.ParseUint(value, 10, 64)
+					if err != nil {
+						return fmt.Errorf("invalid value for %s: %v", key, err)
+					}
+					field.SetUint(uintValue)
+				case reflect.Float32, reflect.Float64:
+					floatValue, err := strconv.ParseFloat(value, 64)
+					if err != nil {
+						return fmt.Errorf("invalid value for %s: %v", key, err)
+					}
+					field.SetFloat(floatValue)
+				case reflect.Bool:
+					boolValue, err := strconv.ParseBool(value)
+					if err != nil {
+						return fmt.Errorf("invalid value for %s: %v", key, err)
+					}
+					field.SetBool(boolValue)
+				default:
+					return fmt.Errorf("unsupported type for field %s", f.Name)
+				}
+				break
 			}
-			field.Set(reflect.ValueOf(result))
-		} else {
-			return fmt.Errorf("config value must be a pointer to a struct or map")
 		}
 	}
 
