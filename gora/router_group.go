@@ -69,3 +69,12 @@ func (g *RouterGroup) Static(pattern, dirname, stripPrefix string) {
 	}
 	g.addRoute(g.prefix+pattern, http.MethodGet, handlerFunc, nil)
 }
+
+// Create a new router group on a router group.
+func (g *RouterGroup) Group(prefix string, middleware ...MiddlewareFunc) *RouterGroup {
+	return &RouterGroup{
+		router:     g.router,
+		prefix:     g.prefix + prefix,
+		middleware: append(g.middleware, middleware...),
+	}
+}
