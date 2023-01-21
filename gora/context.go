@@ -91,6 +91,11 @@ func (c *Context) IntParam(key string) (int, error) {
 	return 0, ErrInvalidParam
 }
 
+// returns a parameter for the key. if it does not exist, returns an empty string.
+func (c *Context) Param(key string) string {
+	return c.Params[key]
+}
+
 // Get parameter as an integer. If key does not exist
 // not a valid integer, IntParam panics.
 func (c *Context) UintParam(key string) (uint, error) {
@@ -251,6 +256,12 @@ func (c *Context) Abort(status int, message string) {
 	c.Response.WriteHeader(status)
 	c.Response.Write([]byte(message))
 	// Set a flag on the context to indicate that the request has been aborted
+	c.aborted = true
+}
+
+// Marks the request as aborted without sending any response.
+// All pending middleware will not run.
+func (c *Context) AbortRequest() {
 	c.aborted = true
 }
 
