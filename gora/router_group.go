@@ -1,6 +1,8 @@
 package gora
 
-import "net/http"
+import (
+	"net/http"
+)
 
 // Router group allows for nesting of url routes.
 // Has similar methods as the base router.
@@ -57,4 +59,13 @@ func (g *RouterGroup) TRACE(pattern string, handler HandlerFunc, middleware ...M
 
 func (g *RouterGroup) HEAD(pattern string, handler HandlerFunc, middleware ...MiddlewareFunc) {
 	g.addRoute(g.prefix+pattern, http.MethodHead, handler, middleware...)
+}
+
+func (g *RouterGroup) Static(pattern, dirname, stripPrefix string) {
+	handler := http.StripPrefix(stripPrefix, http.FileServer(http.Dir(dirname)))
+	handlerFunc := func(ctx *Context) {
+		ctx.Response.WriteHeader(http.StatusOK)
+		handler.ServeHTTP(ctx.Response, ctx.Request)
+	}
+	g.addRoute(g.prefix+pattern, http.MethodGet, handlerFunc, nil)
 }
